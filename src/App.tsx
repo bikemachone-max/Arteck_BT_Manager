@@ -12,6 +12,7 @@ import {
   KeyRound,
   Bluetooth,
   Settings,
+  Radio,
 } from 'lucide-react';
 
 const NAV_ITEMS = [
@@ -23,8 +24,19 @@ const NAV_ITEMS = [
 ];
 
 function App() {
-  const { activeTab, setActiveTab, keepAlive, profiles, activeProfileId } = useStore();
+  const {
+    activeTab,
+    setActiveTab,
+    btAvailable,
+    connectedDevices,
+    keepAliveEnabled,
+    keepAlivePingCount,
+    profiles,
+    activeProfileId,
+    logs,
+  } = useStore();
   const activeProfile = profiles.find((p) => p.id === activeProfileId);
+  const connectedCount = connectedDevices.filter((d) => d.connected).length;
 
   const renderContent = () => {
     switch (activeTab) {
@@ -49,7 +61,7 @@ function App() {
             </div>
             <div>
               <h1 className="font-bold text-white text-lg leading-tight">Arteck BT</h1>
-              <p className="text-xs text-gray-500">Manager v1.0</p>
+              <p className="text-xs text-gray-500">Manager v2.0 — Real BLE</p>
             </div>
           </div>
         </div>
@@ -57,15 +69,19 @@ function App() {
         {/* Active Device */}
         <div className="p-4 border-b border-gray-800/50">
           <div className="bg-gray-800/50 rounded-xl p-3 border border-gray-700/30">
-            <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Active Device</p>
+            <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Active Profile</p>
             <div className="flex items-center gap-2">
               <span className="text-xl">{activeProfile?.icon}</span>
               <div>
                 <p className="text-sm font-semibold text-white">{activeProfile?.name}</p>
                 <div className="flex items-center gap-1">
-                  <div className={`w-2 h-2 rounded-full ${keepAlive.enabled ? 'bg-green-400 animate-pulse' : 'bg-gray-500'}`} />
+                  <div className={`w-2 h-2 rounded-full ${
+                    keepAliveEnabled ? 'bg-green-400 animate-pulse' :
+                    connectedCount > 0 ? 'bg-blue-400' : 'bg-gray-500'
+                  }`} />
                   <span className="text-xs text-gray-400">
-                    {keepAlive.enabled ? 'Protected' : 'Unprotected'}
+                    {keepAliveEnabled ? 'Keep-Alive Active' :
+                     connectedCount > 0 ? `${connectedCount} device(s) connected` : 'No device'}
                   </span>
                 </div>
               </div>
@@ -92,7 +108,7 @@ function App() {
                 <span className={`font-medium text-sm ${isActive ? 'text-white' : 'text-gray-400'}`}>
                   {item.label}
                 </span>
-                {item.id === 'keepalive' && keepAlive.enabled && (
+                {item.id === 'keepalive' && keepAliveEnabled && (
                   <div className="ml-auto w-2 h-2 rounded-full bg-green-400 animate-pulse" />
                 )}
               </button>
@@ -105,26 +121,28 @@ function App() {
           <div className="bg-gradient-to-r from-indigo-900/30 to-purple-900/30 rounded-xl p-4 border border-indigo-500/20">
             <div className="flex items-center gap-2 mb-2">
               <Settings className="w-4 h-4 text-indigo-400" />
-              <span className="text-xs font-semibold text-indigo-300">Quick Status</span>
+              <span className="text-xs font-semibold text-indigo-300">System Status</span>
             </div>
             <div className="space-y-1 text-xs text-gray-400">
               <div className="flex justify-between">
-                <span>Keep-Alive:</span>
-                <span className={keepAlive.enabled ? 'text-green-400' : 'text-red-400'}>
-                  {keepAlive.enabled ? 'ON' : 'OFF'}
+                <span>Web Bluetooth:</span>
+                <span className={btAvailable ? 'text-green-400' : 'text-red-400'}>
+                  {btAvailable ? 'Available' : 'Not Available'}
                 </span>
               </div>
               <div className="flex justify-between">
-                <span>Signals Sent:</span>
-                <span className="text-white">{keepAlive.pingCount}</span>
+                <span>Devices Connected:</span>
+                <span className="text-white">{connectedCount}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Keep-Alive:</span>
+                <span className={keepAliveEnabled ? 'text-green-400' : 'text-gray-500'}>
+                  {keepAliveEnabled ? `ON (${keepAlivePingCount} pings)` : 'OFF'}
+                </span>
               </div>
               <div className="flex justify-between">
                 <span>Macros:</span>
                 <span className="text-white">{activeProfile?.macros.length || 0}</span>
-              </div>
-              <div className="flex justify-between">
-                <span>Hotkeys:</span>
-                <span className="text-white">{Object.keys(activeProfile?.hotkeys || {}).length}</span>
               </div>
             </div>
           </div>
@@ -141,21 +159,26 @@ function App() {
                 {NAV_ITEMS.find((item) => item.id === activeTab)?.label}
               </h2>
               <p className="text-sm text-gray-500">
-                {activeTab === 'keepalive' && 'Prevent your keyboard from disconnecting'}
-                {activeTab === 'macros' && 'Create and manage custom key sequences'}
-                {activeTab === 'profiles' && 'Switch between device configurations'}
-                {activeTab === 'rgb' && 'Customize your keyboard lighting'}
-                {activeTab === 'hotkeys' && 'Assign custom actions to any key'}
+                {activeTab === 'keepalive' && 'Real Web Bluetooth connection & keep-alive signals'}
+                {activeTab === 'macros' && 'Create and execute real keyboard event macros'}
+                {activeTab === 'profiles' && 'Manage device profiles and configurations'}
+                {activeTab === 'rgb' && 'Control RGB lighting via Bluetooth write commands'}
+                {activeTab === 'hotkeys' && 'Assign real actions to any key combination'}
               </p>
             </div>
             <div className="flex items-center gap-3">
               <div className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold ${
-                keepAlive.enabled
+                keepAliveEnabled
                   ? 'bg-green-500/10 text-green-400 border border-green-500/30'
-                  : 'bg-red-500/10 text-red-400 border border-red-500/30'
+                  : connectedCount > 0
+                  ? 'bg-blue-500/10 text-blue-400 border border-blue-500/30'
+                  : 'bg-gray-500/10 text-gray-400 border border-gray-500/30'
               }`}>
-                <div className={`w-2 h-2 rounded-full ${keepAlive.enabled ? 'bg-green-400 animate-pulse' : 'bg-red-400'}`} />
-                {keepAlive.enabled ? 'Protected' : 'At Risk'}
+                <div className={`w-2 h-2 rounded-full ${
+                  keepAliveEnabled ? 'bg-green-400 animate-pulse' :
+                  connectedCount > 0 ? 'bg-blue-400' : 'bg-gray-500'
+                }`} />
+                {keepAliveEnabled ? 'Protected' : connectedCount > 0 ? 'Connected' : 'No Device'}
               </div>
             </div>
           </div>

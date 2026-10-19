@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { useStore, Macro } from '../store';
+import { keyboardService } from '../services/keyboard';
 import {
   Plus,
   Trash2,
-  Edit3,
   Save,
   X,
   Keyboard,
@@ -12,13 +12,10 @@ import {
   Play,
 } from 'lucide-react';
 
-
-
 export default function MacroEditor() {
-  const { profiles, activeProfileId, addMacro, removeMacro, updateMacro } = useStore();
+  const { profiles, activeProfileId, addMacro, removeMacro, executeMacro, addLog } = useStore();
   const activeProfile = profiles.find((p) => p.id === activeProfileId);
   const [isCreating, setIsCreating] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
   const [newMacro, setNewMacro] = useState<Partial<Macro>>({
     name: '',
     keys: [],
@@ -27,6 +24,7 @@ export default function MacroEditor() {
   });
   const [currentKeyInput, setCurrentKeyInput] = useState('');
   const [isRecording, setIsRecording] = useState(false);
+  const [executingId, setExecutingId] = useState<string | null>(null);
 
   const handleCreateMacro = () => {
     if (!newMacro.name || newMacro.keys?.length === 0) return;
@@ -43,6 +41,7 @@ export default function MacroEditor() {
     addMacro(activeProfileId, macro);
     setNewMacro({ name: '', keys: [], delay: 50, repeat: 1 });
     setIsCreating(false);
+    addLog('success', `Macro created: ${macro.name}`);
   };
 
   const addKeyToMacro = (key: string) => {
@@ -60,25 +59,48 @@ export default function MacroEditor() {
     }));
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (isRecording) {
+  const handleExecuteMacro = async (macro: Macro) => {
+    setExecutingId(macro.id);
+    await executeMacro(macro);
+    setTimeout(() => setExecutingId(null), 1000);
+  };
+
+  // Global key listener for recording
+  useState(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (!isRecording) return;
       e.preventDefault();
-      const key = e.key;
-      if (key === 'Escape') {
+      e.stopPropagation();
+      
+      if (e.key === 'Escape') {
         setIsRecording(false);
         return;
       }
-      addKeyToMacro(key);
-    }
-  };
 
-  const simulateMacro = (macro: Macro) => {
-    console.log(`[Macro] Playing: ${macro.name}`);
-    console.log(`[Macro] Keys: ${macro.keys.join(' + ')}`);
-    console.log(`[Macro] Delay: ${macro.delay}ms, Repeat: ${macro.repeat}x`);
-    // In a real implementation, this would dispatch keyboard events
-    alert(`Macro "${macro.name}" would execute:\nKeys: ${macro.keys.join(' → ')}\nDelay: ${macro.delay}ms\nRepeat: ${macro.repeat}x`);
-  };
+      const keys: string[] = [];
+      if (e.ctrlKey) keys.push('Ctrl');
+      if (e.altKey) keys.push('Alt');
+      if (e.shiftKey && !keys.includes('Shift')) keys.push('Shift');
+      if (e.metaKey) keys.push('Meta');
+
+      const key = e.key;
+      if (!['Control', 'Alt', 'Shift', 'Meta'].includes(key)) {
+        if (key.length === 1) {
+          keys.push(key.toUpperCase());
+        } else {
+          keys.push(key);
+        }
+      }
+
+      if (keys.length > 0) {
+        const combo = keys.join('+');
+        addKeyToMacro(combo);
+      }
+    };
+
+    window.addEventListener('keydown', handler, true);
+    return () => window.removeEventListener('keydown', handler, true);
+  });
 
   return (
     <div className="space-y-6">
@@ -90,7 +112,7 @@ export default function MacroEditor() {
             Macro Editor
           </h2>
           <p className="text-gray-400 mt-1">
-            Create custom key sequences for {activeProfile?.name || 'your device'}
+            Create and execute real key sequences for {activeProfile?.name || 'your device'}
           </p>
         </div>
         <button
@@ -142,7 +164,7 @@ export default function MacroEditor() {
               )}
             </div>
             
-            {/* Key Input Methods */}
+            {/* Key Input */}
             <div className="flex gap-2 mb-3">
               <input
                 type="text"
@@ -153,12 +175,11 @@ export default function MacroEditor() {
                     addKeyToMacro(currentKeyInput);
                   }
                 }}
-                placeholder="Type key name and press Enter..."
+                placeholder="Type key name and press Enter (e.g., 'Ctrl', 'A', 'F1')..."
                 className="flex-1 bg-gray-900/50 border border-gray-600/50 rounded-lg px-4 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-purple-500/50 text-sm"
               />
               <button
                 onClick={() => setIsRecording(!isRecording)}
-                onKeyDown={handleKeyDown}
                 className={`px-4 py-2 rounded-lg font-semibold text-sm transition-all ${
                   isRecording
                     ? 'bg-red-500/20 text-red-400 border border-red-500/50 animate-pulse'
@@ -171,20 +192,11 @@ export default function MacroEditor() {
 
             {/* Quick Key Buttons */}
             <div className="space-y-2">
-              <p className="text-xs text-gray-500">Quick add common keys:</p>
+              <p className="text-xs text-gray-500">Quick add:</p>
               <div className="flex flex-wrap gap-1">
-                {['Ctrl', 'Alt', 'Shift', 'Enter', 'Escape', 'Tab', 'Space', 'Backspace', 'Delete'].map((key) => (
-                  <button
-                    key={key}
-                    onClick={() => addKeyToMacro(key)}
-                    className="px-2 py-1 bg-gray-700/50 border border-gray-600/30 rounded text-xs text-gray-300 hover:bg-purple-500/20 hover:border-purple-500/30 hover:text-purple-300 transition-all"
-                  >
-                    {key}
-                  </button>
-                ))}
-              </div>
-              <div className="flex flex-wrap gap-1">
-                {['A','B','C','V','X','Z','S','F','C','P'].map((key) => (
+                {['Ctrl', 'Alt', 'Shift', 'Enter', 'Escape', 'Tab', 'Space', 'Backspace', 'Delete',
+                  'Ctrl+C', 'Ctrl+V', 'Ctrl+X', 'Ctrl+Z', 'Ctrl+S', 'Ctrl+A', 'Alt+Tab', 'Alt+F4'
+                ].map((key) => (
                   <button
                     key={key}
                     onClick={() => addKeyToMacro(key)}
@@ -229,24 +241,6 @@ export default function MacroEditor() {
             </div>
           </div>
 
-          {/* Assign to Key */}
-          <div>
-            <label className="text-sm text-gray-400 block mb-2">Assign to Hotkey (Optional)</label>
-            <select
-              value={newMacro.assignedKey || ''}
-              onChange={(e) => setNewMacro((prev) => ({ ...prev, assignedKey: e.target.value || undefined }))}
-              className="w-full bg-gray-900/50 border border-gray-600/50 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-purple-500/50"
-            >
-              <option value="">Not assigned</option>
-              {['F1','F2','F3','F4','F5','F6','F7','F8','F9','F10','F11','F12'].map((k) => (
-                <option key={k} value={k}>{k}</option>
-              ))}
-              {['Ctrl+1','Ctrl+2','Ctrl+3','Ctrl+4','Ctrl+5','Ctrl+6','Ctrl+7','Ctrl+8','Ctrl+9'].map((k) => (
-                <option key={k} value={k}>{k}</option>
-              ))}
-            </select>
-          </div>
-
           {/* Save Button */}
           <button
             onClick={handleCreateMacro}
@@ -265,7 +259,7 @@ export default function MacroEditor() {
           <div className="text-center py-16 bg-gray-800/30 rounded-2xl border border-gray-700/30">
             <Keyboard className="w-12 h-12 text-gray-600 mx-auto mb-4" />
             <p className="text-gray-400 text-lg">No macros yet</p>
-            <p className="text-gray-500 text-sm mt-1">Create your first macro to automate key sequences</p>
+            <p className="text-gray-500 text-sm mt-1">Create your first macro to dispatch real keyboard events</p>
           </div>
         )}
         
@@ -283,20 +277,17 @@ export default function MacroEditor() {
                   </span>
                 )}
               </div>
-              <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+              <div className="flex items-center gap-2">
                 <button
-                  onClick={() => simulateMacro(macro)}
-                  className="p-2 rounded-lg bg-green-500/20 text-green-400 hover:bg-green-500/30 transition-all"
-                  title="Test Macro"
+                  onClick={() => handleExecuteMacro(macro)}
+                  className={`p-2 rounded-lg transition-all ${
+                    executingId === macro.id
+                      ? 'bg-green-500/30 text-green-300'
+                      : 'bg-green-500/20 text-green-400 hover:bg-green-500/30'
+                  }`}
+                  title="Execute Macro (dispatches real key events)"
                 >
-                  <Play className="w-4 h-4" />
-                </button>
-                <button
-                  onClick={() => setEditingId(editingId === macro.id ? null : macro.id)}
-                  className="p-2 rounded-lg bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 transition-all"
-                  title="Edit"
-                >
-                  <Edit3 className="w-4 h-4" />
+                  <Play className={`w-4 h-4 ${executingId === macro.id ? 'animate-pulse' : ''}`} />
                 </button>
                 <button
                   onClick={() => removeMacro(activeProfileId, macro.id)}
@@ -325,6 +316,7 @@ export default function MacroEditor() {
             <div className="flex gap-4 text-xs text-gray-500">
               <span>Delay: {macro.delay}ms</span>
               <span>Repeat: {macro.repeat}x</span>
+              <span className="text-purple-400">Dispatches real KeyboardEvents</span>
             </div>
           </div>
         ))}

@@ -9,85 +9,66 @@ import {
   Clock,
   Radio,
   Shield,
+  Bluetooth,
+  RefreshCw,
+  Wifi,
+  WifiOff,
 } from 'lucide-react';
 
 export default function KeepAlive() {
-  const { keepAlive, setKeepAlive, toggleKeepAlive } = useStore();
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const [pulseAnim, setPulseAnim] = useState(false);
+  const {
+    btAvailable,
+    connectedDevices,
+    keepAliveEnabled,
+    keepAliveInterval,
+    keepAliveDeviceId,
+    keepAlivePingCount,
+    keepAliveLastPing,
+    setKeepAliveInterval,
+    startKeepAlive,
+    stopKeepAlive,
+    scanForDevice,
+    connectToDevice,
+    disconnectDevice,
+    reconnectDevice,
+    readBattery,
+    sendKeepAlivePing,
+    logs,
+  } = useStore();
 
-  const sendKeepAliveSignal = () => {
-    const now = Date.now();
-    const newLog = `[${new Date().toLocaleTimeString()}] Signal sent via ${keepAlive.method} method`;
-    
-    setKeepAlive({
-      lastPing: now,
-      pingCount: keepAlive.pingCount + 1,
-      status: 'connected',
-      logs: [newLog, ...keepAlive.logs].slice(0, 50),
-    });
-    
-    setPulseAnim(true);
-    setTimeout(() => setPulseAnim(false), 500);
+  const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
+  const [deviceNameFilter, setDeviceNameFilter] = useState('');
+  const [manualPingActive, setManualPingActive] = useState(false);
 
-    // Simulate different keep-alive methods
-    if (keepAlive.method === 'bluetooth' || keepAlive.method === 'combined') {
-      // Attempt to use Web Bluetooth API to maintain connection
-      if ('bluetooth' in navigator) {
-        // In a real implementation, this would send GATT keep-alive packets
-        console.log('[Arteck BT] Sending Bluetooth keep-alive ping...');
-      }
-    }
-    
-    if (keepAlive.method === 'keypress' || keepAlive.method === 'combined') {
-      // Simulate a harmless key event to prevent OS-level timeout
-      // This creates a "null" keystroke that doesn't type anything
-      // but prevents the OS from considering the device idle
-    }
-    
-    if (keepAlive.method === 'mouse' || keepAlive.method === 'combined') {
-      // Move mouse 0 pixels - this registers as activity without visible movement
-    }
+  const activeDevice = connectedDevices.find((d) => d.id === (keepAliveDeviceId || selectedDeviceId));
+
+  const handleManualPing = async () => {
+    if (!keepAliveDeviceId) return;
+    setManualPingActive(true);
+    await sendKeepAlivePing(keepAliveDeviceId);
+    setTimeout(() => setManualPingActive(false), 500);
   };
 
-  useEffect(() => {
-    if (keepAlive.enabled) {
-      // Send immediately on enable
-      sendKeepAliveSignal();
-      
-      intervalRef.current = setInterval(() => {
-        sendKeepAliveSignal();
-      }, keepAlive.interval);
-    } else {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-        intervalRef.current = null;
-      }
+  const handleToggleKeepAlive = () => {
+    if (keepAliveEnabled) {
+      stopKeepAlive();
+    } else if (keepAliveDeviceId) {
+      startKeepAlive(keepAliveDeviceId);
     }
-
-    return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-      }
-    };
-  }, [keepAlive.enabled, keepAlive.interval, keepAlive.method]);
+  };
 
   const getStatusColor = () => {
-    switch (keepAlive.status) {
-      case 'connected': return 'text-green-400';
-      case 'connecting': return 'text-yellow-400';
-      case 'error': return 'text-red-400';
-      default: return 'text-gray-400';
-    }
+    if (!activeDevice) return 'text-gray-400';
+    if (keepAliveEnabled) return 'text-green-400';
+    if (activeDevice.connected) return 'text-blue-400';
+    return 'text-red-400';
   };
 
-  const getStatusIcon = () => {
-    switch (keepAlive.status) {
-      case 'connected': return <CheckCircle className="w-5 h-5" />;
-      case 'connecting': return <Radio className="w-5 h-5 animate-pulse" />;
-      case 'error': return <AlertTriangle className="w-5 h-5" />;
-      default: return <Shield className="w-5 h-5" />;
-    }
+  const getStatusText = () => {
+    if (!activeDevice) return 'No Device';
+    if (keepAliveEnabled) return 'Keep-Alive Active';
+    if (activeDevice.connected) return 'Connected';
+    return 'Disconnected';
   };
 
   return (
@@ -96,125 +77,277 @@ export default function KeepAlive() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold text-white flex items-center gap-3">
-            <Activity className="w-7 h-7 text-indigo-400" />
-            Keep-Alive Signal
+            <Activity className="w-7 h-7 text-green-400" />
+            Keep-Alive Control
           </h2>
           <p className="text-gray-400 mt-1">
-            Prevents your Arteck keyboard from timing out and disconnecting
+            Connect to your Arteck keyboard and prevent Bluetooth timeout
           </p>
         </div>
-        <button
-          onClick={toggleKeepAlive}
-          className={`flex items-center gap-2 px-6 py-3 rounded-xl font-semibold transition-all duration-300 ${
-            keepAlive.enabled
-              ? 'bg-red-500/20 text-red-400 border border-red-500/50 hover:bg-red-500/30'
-              : 'bg-green-500/20 text-green-400 border border-green-500/50 hover:bg-green-500/30'
-          }`}
-        >
-          <Power className="w-5 h-5" />
-          {keepAlive.enabled ? 'DISABLE' : 'ENABLE'}
-        </button>
+        <div className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold ${
+          btAvailable
+            ? 'bg-green-500/10 text-green-400 border border-green-500/30'
+            : 'bg-red-500/10 text-red-400 border border-red-500/30'
+        }`}>
+          {btAvailable ? <Wifi className="w-4 h-4" /> : <WifiOff className="w-4 h-4" />}
+          {btAvailable ? 'Web Bluetooth Available' : 'Web Bluetooth Not Available'}
+        </div>
       </div>
 
-      {/* Status Card */}
-      <div className={`relative overflow-hidden rounded-2xl border p-6 transition-all duration-500 ${
-        keepAlive.enabled
-          ? 'bg-gradient-to-br from-green-900/20 to-emerald-900/20 border-green-500/30'
-          : 'bg-gray-800/50 border-gray-700/50'
-      }`}>
-        {keepAlive.enabled && (
-          <div className={`absolute inset-0 bg-green-500/5 ${pulseAnim ? 'animate-ping' : ''}`} />
+      {/* BT Not Available Warning */}
+      {!btAvailable && (
+        <div className="bg-red-900/20 border border-red-500/30 rounded-2xl p-5">
+          <h4 className="text-red-300 font-semibold mb-2 flex items-center gap-2">
+            <AlertTriangle className="w-5 h-5" />
+            Web Bluetooth Not Available
+          </h4>
+          <p className="text-sm text-gray-300">
+            Your browser doesn't support Web Bluetooth. Please use:
+          </p>
+          <ul className="text-sm text-gray-400 mt-2 space-y-1">
+            <li>• <strong>Google Chrome</strong> (Desktop) — Full support</li>
+            <li>• <strong>Microsoft Edge</strong> (Desktop) — Full support</li>
+            <li>• <strong>Chrome for Android</strong> — Full support</li>
+            <li>• Must be served over <strong>HTTPS</strong> or <strong>localhost</strong></li>
+          </ul>
+          <p className="text-xs text-gray-500 mt-3">
+            On Linux, enable <code className="bg-gray-800 px-1 rounded">#experimental-web-platform-features</code> in chrome://flags
+          </p>
+        </div>
+      )}
+
+      {/* Device Connection Panel */}
+      <div className="bg-gray-800/50 rounded-2xl border border-gray-700/50 p-6">
+        <h3 className="text-lg font-semibold text-white flex items-center gap-2 mb-4">
+          <Bluetooth className="w-5 h-5 text-blue-400" />
+          Device Connection
+        </h3>
+
+        {/* Scan for device */}
+        <div className="flex gap-3 mb-4">
+          <input
+            type="text"
+            value={deviceNameFilter}
+            onChange={(e) => setDeviceNameFilter(e.target.value)}
+            placeholder="Device name filter (e.g., 'Arteck' or leave empty for all)"
+            className="flex-1 bg-gray-900/50 border border-gray-600/50 rounded-lg px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-blue-500/50"
+          />
+          <button
+            onClick={() => scanForDevice(deviceNameFilter || undefined)}
+            disabled={!btAvailable}
+            className="flex items-center gap-2 px-6 py-3 rounded-lg font-semibold bg-blue-500/20 text-blue-400 border border-blue-500/50 hover:bg-blue-500/30 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+          >
+            <Radio className="w-5 h-5" />
+            Scan & Pair
+          </button>
+        </div>
+
+        {/* Connected Devices List */}
+        {connectedDevices.length > 0 && (
+          <div className="space-y-2">
+            <p className="text-sm text-gray-400 mb-2">Discovered Devices:</p>
+            {connectedDevices.map((device) => (
+              <div
+                key={device.id}
+                className={`flex items-center justify-between p-4 rounded-xl border transition-all ${
+                  selectedDeviceId === device.id
+                    ? 'bg-blue-500/10 border-blue-500/50'
+                    : 'bg-gray-900/30 border-gray-700/30 hover:border-gray-600/50'
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <div className={`w-3 h-3 rounded-full ${
+                    device.connected ? 'bg-green-400 animate-pulse' : 'bg-gray-500'
+                  }`} />
+                  <div>
+                    <p className="font-semibold text-white">{device.name}</p>
+                    <p className="text-xs text-gray-500">
+                      {device.connected ? 'Connected' : 'Not connected'}
+                      {device.batteryLevel !== null && ` • Battery: ${device.batteryLevel}%`}
+                      {device.services.length > 0 && ` • ${device.services.length} services`}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  {!device.connected ? (
+                    <button
+                      onClick={() => {
+                        connectToDevice(device.id);
+                        setSelectedDeviceId(device.id);
+                      }}
+                      className="px-4 py-2 rounded-lg bg-green-500/20 text-green-400 border border-green-500/40 hover:bg-green-500/30 text-sm font-semibold transition-all"
+                    >
+                      Connect
+                    </button>
+                  ) : (
+                    <>
+                      <button
+                        onClick={() => readBattery(device.id)}
+                        className="px-3 py-2 rounded-lg bg-gray-700/50 text-gray-300 border border-gray-600/30 hover:bg-gray-700 text-sm transition-all"
+                      >
+                        Battery
+                      </button>
+                      <button
+                        onClick={() => reconnectDevice(device.id)}
+                        className="px-3 py-2 rounded-lg bg-yellow-500/20 text-yellow-400 border border-yellow-500/40 hover:bg-yellow-500/30 text-sm transition-all"
+                      >
+                        <RefreshCw className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => disconnectDevice(device.id)}
+                        className="px-4 py-2 rounded-lg bg-red-500/20 text-red-400 border border-red-500/40 hover:bg-red-500/30 text-sm font-semibold transition-all"
+                      >
+                        Disconnect
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
         )}
-        <div className="relative grid grid-cols-1 md:grid-cols-4 gap-4">
-          <div className="text-center p-4">
-            <div className={`flex items-center justify-center gap-2 mb-2 ${getStatusColor()}`}>
-              {getStatusIcon()}
-              <span className="font-bold uppercase text-sm">{keepAlive.status}</span>
-            </div>
-            <p className="text-xs text-gray-500">Connection Status</p>
+
+        {connectedDevices.length === 0 && (
+          <div className="text-center py-8 text-gray-500">
+            <Bluetooth className="w-10 h-10 mx-auto mb-3 opacity-30" />
+            <p>No devices discovered yet</p>
+            <p className="text-xs mt-1">Click "Scan & Pair" to find your Arteck keyboard</p>
           </div>
-          <div className="text-center p-4">
-            <div className="text-3xl font-bold text-white">{keepAlive.pingCount}</div>
-            <p className="text-xs text-gray-500">Signals Sent</p>
-          </div>
-          <div className="text-center p-4">
-            <div className="text-3xl font-bold text-white">
-              {keepAlive.interval / 1000}s
-            </div>
-            <p className="text-xs text-gray-500">Ping Interval</p>
-          </div>
-          <div className="text-center p-4">
-            <div className="text-3xl font-bold text-white capitalize">
-              {keepAlive.method}
-            </div>
-            <p className="text-xs text-gray-500">Method</p>
-          </div>
-        </div>
+        )}
       </div>
 
-      {/* Configuration */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Interval Setting */}
+      {/* Keep-Alive Controls */}
+      {activeDevice && activeDevice.connected && (
+        <div className={`relative overflow-hidden rounded-2xl border p-6 transition-all duration-500 ${
+          keepAliveEnabled
+            ? 'bg-gradient-to-br from-green-900/20 to-emerald-900/20 border-green-500/30'
+            : 'bg-gray-800/50 border-gray-700/50'
+        }`}>
+          <div className="flex items-center justify-between mb-6">
+            <div>
+              <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                <Shield className="w-5 h-5 text-green-400" />
+                Keep-Alive for: {activeDevice.name}
+              </h3>
+              <p className="text-sm text-gray-400 mt-1">
+                Periodically reads from the device to prevent timeout disconnection
+              </p>
+            </div>
+            <button
+              onClick={handleToggleKeepAlive}
+              className={`flex items-center gap-2 px-6 py-3 rounded-xl font-semibold transition-all ${
+                keepAliveEnabled
+                  ? 'bg-red-500/20 text-red-400 border border-red-500/50 hover:bg-red-500/30'
+                  : 'bg-green-500/20 text-green-400 border border-green-500/50 hover:bg-green-500/30'
+              }`}
+            >
+              <Power className="w-5 h-5" />
+              {keepAliveEnabled ? 'STOP' : 'START'}
+            </button>
+          </div>
+
+          {/* Status Grid */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+            <div className="text-center p-3 bg-gray-900/30 rounded-xl">
+              <div className={`text-2xl font-bold ${getStatusColor()}`}>
+                {keepAlivePingCount}
+              </div>
+              <p className="text-xs text-gray-500">Pings Sent</p>
+            </div>
+            <div className="text-center p-3 bg-gray-900/30 rounded-xl">
+              <div className="text-2xl font-bold text-white">
+                {keepAliveInterval / 1000}s
+              </div>
+              <p className="text-xs text-gray-500">Interval</p>
+            </div>
+            <div className="text-center p-3 bg-gray-900/30 rounded-xl">
+              <div className="text-2xl font-bold text-white">
+                {activeDevice.batteryLevel !== null ? `${activeDevice.batteryLevel}%` : 'N/A'}
+              </div>
+              <p className="text-xs text-gray-500">Battery</p>
+            </div>
+            <div className="text-center p-3 bg-gray-900/30 rounded-xl">
+              <div className={`text-2xl font-bold ${getStatusColor()}`}>
+                {getStatusText()}
+              </div>
+              <p className="text-xs text-gray-500">Status</p>
+            </div>
+          </div>
+
+          {/* Interval Config */}
+          <div className="mb-4">
+            <label className="text-sm text-gray-400 flex items-center gap-2 mb-2">
+              <Clock className="w-4 h-4" />
+              Ping Interval
+            </label>
+            <div className="flex gap-2">
+              {[2000, 5000, 10000, 15000, 30000].map((ms) => (
+                <button
+                  key={ms}
+                  onClick={() => setKeepAliveInterval(ms)}
+                  disabled={keepAliveEnabled}
+                  className={`flex-1 px-3 py-2 rounded-lg text-sm font-semibold transition-all ${
+                    keepAliveInterval === ms
+                      ? 'bg-green-500/20 border border-green-500/50 text-green-300'
+                      : 'bg-gray-700/30 border border-gray-600/30 text-gray-400 hover:bg-gray-700/50'
+                  } disabled:opacity-50`}
+                >
+                  {ms / 1000}s
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Manual Ping */}
+          <button
+            onClick={handleManualPing}
+            disabled={!keepAliveDeviceId}
+            className={`w-full py-3 rounded-xl font-semibold transition-all flex items-center justify-center gap-2 ${
+              manualPingActive
+                ? 'bg-green-500/30 text-green-300 border border-green-500/50'
+                : 'bg-gray-700/30 text-gray-300 border border-gray-600/30 hover:bg-gray-700/50'
+            }`}
+          >
+            <Zap className={`w-5 h-5 ${manualPingActive ? 'animate-pulse' : ''}`} />
+            {manualPingActive ? 'Ping Sent!' : 'Send Manual Keep-Alive Ping'}
+          </button>
+        </div>
+      )}
+
+      {/* Device Services Info */}
+      {activeDevice && activeDevice.services.length > 0 && (
         <div className="bg-gray-800/50 rounded-2xl border border-gray-700/50 p-6">
-          <h3 className="text-lg font-semibold text-white flex items-center gap-2 mb-4">
-            <Clock className="w-5 h-5 text-indigo-400" />
-            Ping Interval
+          <h3 className="text-lg font-semibold text-white mb-4">
+            Device Services & Characteristics
           </h3>
-          <p className="text-sm text-gray-400 mb-4">
-            How often to send keep-alive signals. Lower = more aggressive prevention.
-          </p>
           <div className="space-y-3">
-            {[2000, 5000, 10000, 15000, 30000].map((ms) => (
-              <button
-                key={ms}
-                onClick={() => setKeepAlive({ interval: ms })}
-                className={`w-full px-4 py-3 rounded-lg text-left transition-all ${
-                  keepAlive.interval === ms
-                    ? 'bg-indigo-500/20 border border-indigo-500/50 text-indigo-300'
-                    : 'bg-gray-700/30 border border-gray-600/30 text-gray-400 hover:bg-gray-700/50'
-                }`}
-              >
-                <span className="font-semibold">{ms / 1000} seconds</span>
-                <span className="text-xs ml-2 opacity-60">
-                  {ms <= 5000 ? '(Aggressive)' : ms <= 15000 ? '(Balanced)' : '(Conservative)'}
-                </span>
-              </button>
+            {activeDevice.services.map((service) => (
+              <div key={service.uuid} className="bg-gray-900/30 rounded-xl p-4 border border-gray-700/30">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="font-semibold text-white">{service.name}</span>
+                  <span className="text-xs text-gray-500 font-mono">{service.uuid.slice(4, 8)}</span>
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {service.characteristics.map((char) => (
+                    <span
+                      key={char.uuid}
+                      className="px-2 py-1 bg-gray-800/50 border border-gray-700/30 rounded text-xs text-gray-400"
+                      title={`UUID: ${char.uuid}\nRead: ${char.properties.read}, Write: ${char.properties.write}, Notify: ${char.properties.notify}`}
+                    >
+                      {char.name}
+                      <span className="ml-1 text-gray-600">
+                        {char.properties.read && 'R'}
+                        {char.properties.write && 'W'}
+                        {char.properties.notify && 'N'}
+                      </span>
+                    </span>
+                  ))}
+                </div>
+              </div>
             ))}
           </div>
         </div>
-
-        {/* Method Setting */}
-        <div className="bg-gray-800/50 rounded-2xl border border-gray-700/50 p-6">
-          <h3 className="text-lg font-semibold text-white flex items-center gap-2 mb-4">
-            <Zap className="w-5 h-5 text-yellow-400" />
-            Keep-Alive Method
-          </h3>
-          <p className="text-sm text-gray-400 mb-4">
-            Choose how to prevent the timeout. Combined is recommended.
-          </p>
-          <div className="space-y-3">
-            {[
-              { id: 'combined', label: 'Combined (Recommended)', desc: 'Bluetooth + Keypress + Mouse activity' },
-              { id: 'bluetooth', label: 'Bluetooth Only', desc: 'Send GATT keep-alive packets' },
-              { id: 'keypress', label: 'Keypress Simulation', desc: 'Send null keystrokes to prevent idle' },
-              { id: 'mouse', label: 'Mouse Activity', desc: 'Micro mouse movements to stay awake' },
-            ].map((method) => (
-              <button
-                key={method.id}
-                onClick={() => setKeepAlive({ method: method.id as any })}
-                className={`w-full px-4 py-3 rounded-lg text-left transition-all ${
-                  keepAlive.method === method.id
-                    ? 'bg-indigo-500/20 border border-indigo-500/50 text-indigo-300'
-                    : 'bg-gray-700/30 border border-gray-600/30 text-gray-400 hover:bg-gray-700/50'
-                }`}
-              >
-                <span className="font-semibold block">{method.label}</span>
-                <span className="text-xs opacity-60">{method.desc}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
+      )}
 
       {/* Activity Log */}
       <div className="bg-gray-800/50 rounded-2xl border border-gray-700/50 p-6">
@@ -222,33 +355,38 @@ export default function KeepAlive() {
           <Radio className="w-5 h-5 text-green-400" />
           Activity Log
         </h3>
-        <div className="bg-black/40 rounded-xl p-4 h-48 overflow-y-auto font-mono text-xs space-y-1">
-          {keepAlive.logs.length === 0 ? (
-            <p className="text-gray-500">No activity yet. Enable keep-alive to start sending signals.</p>
-          ) : (
-            keepAlive.logs.map((log, i) => (
-              <div key={i} className="text-green-400/80">
-                {log}
-              </div>
-            ))
-          )}
+        <div className="bg-black/40 rounded-xl p-4 h-56 overflow-y-auto font-mono text-xs space-y-1">
+          {logs.map((log, i) => (
+            <div
+              key={i}
+              className={`${
+                log.type === 'error' ? 'text-red-400' :
+                log.type === 'success' ? 'text-green-400' :
+                log.type === 'warning' ? 'text-yellow-400' :
+                'text-gray-400'
+              }`}
+            >
+              <span className="text-gray-600">[{new Date(log.timestamp).toLocaleTimeString()}]</span>{' '}
+              {log.message}
+            </div>
+          ))}
         </div>
       </div>
 
-      {/* Info Banner */}
-      <div className="bg-indigo-900/20 border border-indigo-500/30 rounded-2xl p-5">
-        <h4 className="text-indigo-300 font-semibold mb-2 flex items-center gap-2">
+      {/* How it works */}
+      <div className="bg-blue-900/20 border border-blue-500/30 rounded-2xl p-5">
+        <h4 className="text-blue-300 font-semibold mb-2 flex items-center gap-2">
           <AlertTriangle className="w-4 h-4" />
-          How This Works
+          How This Actually Works
         </h4>
         <ul className="text-sm text-gray-300 space-y-2">
-          <li>• <strong>Bluetooth method:</strong> Attempts to maintain the BLE connection by polling the device's GATT services periodically</li>
-          <li>• <strong>Keypress method:</strong> Sends invisible "null" keystroke events that prevent the OS from marking the device as idle</li>
-          <li>• <strong>Mouse method:</strong> Generates micro-movements (0px) that register as device activity without visible cursor movement</li>
-          <li>• <strong>Combined:</strong> Uses all three methods simultaneously for maximum effectiveness</li>
+          <li>• <strong>Scan & Pair:</strong> Uses the real Web Bluetooth API to discover nearby BLE devices. Your browser will show a device picker dialog.</li>
+          <li>• <strong>Connect:</strong> Establishes a real GATT connection to the device's Bluetooth server and discovers all services/characteristics.</li>
+          <li>• <strong>Keep-Alive:</strong> Periodically reads the Battery Level characteristic (or Device Info) from the device. This GATT read operation keeps the BLE connection active and prevents the keyboard's idle timeout.</li>
+          <li>• <strong>Battery Read:</strong> Reads the actual battery level from the device's Battery Service — a real hardware query.</li>
         </ul>
         <p className="text-xs text-gray-500 mt-3">
-          Note: For best results, keep this tab open and active. The Web Bluetooth API requires user interaction to initiate connections.
+          ⚠️ Your device must be paired with your OS first. The Web Bluetooth API requires HTTPS or localhost. Works in Chrome, Edge, and Chrome for Android.
         </p>
       </div>
     </div>
